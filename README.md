@@ -76,7 +76,6 @@ Then copy the command files:
 ```bash
 mkdir -p ~/.claude/commands
 cp commands/codex-subagents.md ~/.claude/commands/
-cp commands/codex-subagents-en.md ~/.claude/commands/
 ```
 
 > **Note:** Do NOT manually edit `~/.claude/mcp_settings.json` — Claude Code does not read that file. Always use `claude mcp add` or edit `~/.claude.json` directly.
@@ -94,25 +93,24 @@ After installation, restart Claude Code to use.
 ### Commands
 
 ```bash
-/codex-subagents-en <task description>   # English version
-/codex-subagents <task description>      # Chinese version (original)
+/codex-subagents <task description>
 ```
 
 ### Examples
 
 **Example 1: Create React Components**
 ```
-/codex-subagents-en Create a user authentication system with login, registration, and password reset features
+/codex-subagents Create a user authentication system with login, registration, and password reset features
 ```
 
 **Example 2: Refactor Code**
 ```
-/codex-subagents-en Migrate all React class components to function components and Hooks
+/codex-subagents Migrate all React class components to function components and Hooks
 ```
 
 **Example 3: Add Features**
 ```
-/codex-subagents-en Add comments, likes, and sharing features to the blog system
+/codex-subagents Add comments, likes, and sharing features to the blog system
 ```
 
 ## How It Works

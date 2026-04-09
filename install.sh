@@ -215,7 +215,6 @@ mkdir -p "$COMMANDS_DIR"
 
 # Copy command files
 cp "$SCRIPT_DIR/commands/codex-subagents.md" "$COMMANDS_DIR/"
-cp "$SCRIPT_DIR/commands/codex-subagents-en.md" "$COMMANDS_DIR/"
 echo -e "${GREEN}✓ Commands copied to: $COMMANDS_DIR${NC}"
 echo ""
 
@@ -270,8 +269,7 @@ echo -e "   Plugin: $PLUGINS_DIR/codex-subagents"
 echo -e "   MCP Config: registered via 'claude mcp add' (stored in ~/.claude.json)"
 echo ""
 echo -e "${YELLOW}🎯 Usage:${NC}"
-echo -e "   ${GREEN}/codex-subagents${NC} <task description>     # Chinese version"
-echo -e "   ${GREEN}/codex-subagents-en${NC} <task description>  # English version"
+echo -e "   ${GREEN}/codex-subagents${NC} <task description>"
 echo ""
 echo -e "${YELLOW}💡 Tips:${NC}"
 echo -e "   - MCP server runs automatically via uvx (Python-based)"

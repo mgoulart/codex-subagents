@@ -5,7 +5,7 @@ category: orchestration
 args: task description
 ---
 
-# Codex Subagents - Codex 子代理编排
+# Codex Subagents - Codex Agent Orchestration
 
 You are coordinating a complex task by delegating to multiple Codex sub-agents via MCP.
 
@@ -70,7 +70,7 @@ Analyze the task to understand:
 **Questions to answer:**
 - What files/components need changes?
 - Are changes independent or dependent?
-- What's the optimal agent count (3-7)?
+- What's the optimal agent count?
 - What patterns should be followed?
 
 ### Step 2: Task Decomposition (1 minute)
@@ -448,4 +448,4 @@ Provide a comprehensive report:
 
 ---
 
-**Important Note: You may think in English internally, but always interact with the user in Chinese. This is important — keep it in mind.**
+**Always respond in English.**
