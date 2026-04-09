@@ -1,450 +1,201 @@
 ---
 name: codex-subagents
-description: "Orchestrate complex tasks by delegating to multiple parallel Codex agents, then merge and review results"
+description: "Orchestrate complex tasks by delegating to multiple parallel Codex agents with live monitoring"
 category: orchestration
 args: task description
 ---
 
-# Codex Subagents - Codex Agent Orchestration
+# Codex Subagents - Orchestration with Live Monitoring
 
-You are coordinating a complex task by delegating to multiple Codex sub-agents via MCP.
+You are coordinating a complex task by delegating to multiple Codex sub-agents via MCP, with real-time progress visibility.
 
 ## Your Role
 
 Act as an intelligent orchestrator that:
-1. Analyzes the task and breaks it into parallelizable units
-2. Delegates to Codex agents via `mcp__codex-subagent__spawn_agents_parallel` (max 3 agents per batch)
-3. Chains execution if >3 agents needed, with progress tracking using TodoWrite
-4. Logs all subagent activities to `.codex-temp/[timestamp]/[function-name].log`
-5. Collects results and intelligently merges them
-6. Validates quality through comprehensive checks
-7. Reports results with actionable next steps
+1. Analyzes the task and breaks it into **small, focused** agent jobs
+2. Launches agents with `mcp__codex-subagent__spawn_agents_async` (non-blocking)
+3. Monitors progress with `mcp__codex-subagent__check_agents_status` (polling)
+4. Reports live progress to the user as agents work
+5. Collects results and merges them when complete
+6. Chains additional batches if needed
 
 ## Task: $ARGUMENTS
 
+## Available MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `spawn_agents_async` | Launch agents, return immediately with `job_id` |
+| `check_agents_status` | Poll agent progress — shows live log output per agent |
+| `spawn_agents_parallel` | Launch agents and block until all complete (fallback) |
+
 ## Process Flow
 
-### Step 0: Ensure .gitignore Setup (5 seconds)
+### Step 1: Task Analysis & Decomposition
 
-**IMPORTANT: Prevent committing temporary files**
+Break the task into **small, focused units** following these principles:
 
-Before starting, ensure the project has proper .gitignore configuration:
+**Scope each agent narrowly:**
+- BAD: "Scan all of vms/lib/ for null-contract bugs" (too broad, black box)
+- GOOD: "Scan vms/lib/comments/ for null dereferences on data from DB lookups" (focused, observable)
 
-```bash
-# Check if .gitignore exists
-if [ ! -f .gitignore ]; then
-  echo "Creating .gitignore to prevent committing temporary files..."
-  cat > .gitignore << 'EOF'
-# Codex Subagents temporary files
-.codex-temp/
+**Target 1-3 specific directories or files per agent.** This keeps agents fast (~30-60s) and their logs readable.
 
-# Common temporary files
-*.log
-.DS_Store
-EOF
-  echo "✓ Created .gitignore"
-else
-  # Check if .codex-temp/ is already ignored
-  if ! grep -q "\.codex-temp/" .gitignore; then
-    echo "Adding .codex-temp/ to .gitignore..."
-    echo "" >> .gitignore
-    echo "# Codex Subagents temporary files" >> .gitignore
-    echo ".codex-temp/" >> .gitignore
-    echo "✓ Updated .gitignore"
-  fi
-fi
-```
+**Use these decomposition strategies:**
 
-**Why this matters:**
-- `.codex-temp/` contains agent logs and temporary files
-- These files are project-specific and should NOT be committed
-- Ensures clean git history without temporary artifacts
-
-### Step 1: Task Analysis (30 seconds)
-Analyze the task to understand:
-- Scope and boundaries
-- File dependencies
-- Optimal parallelization strategy
-- Expected complexity
-
-**Questions to answer:**
-- What files/components need changes?
-- Are changes independent or dependent?
-- What's the optimal agent count?
-- What patterns should be followed?
-
-### Step 2: Task Decomposition (1 minute)
-Break the task into atomic, parallelizable units using one of these strategies:
-
-**Important Constraints:**
-- Maximum 3 agents per batch (to avoid MCP content overflow)
-- If >3 agents needed, use chain processing (execute in batches of 3)
-- Track all tasks using TodoWrite to show progress
-- Log each agent's work to `.codex-temp/[timestamp]/[function-name].log`
-
-**File-Based**: Independent files → 1 agent per file group
+**Directory-Based** (for codebase scans/audits):
 ```yaml
-agent_1: [UserCard.tsx, UserCard.test.tsx]
-agent_2: [ProductCard.tsx, ProductCard.test.tsx]
-agent_3: [CommentCard.tsx, CommentCard.test.tsx]
+agent_0: Scan vms/lib/comments/ for [pattern]
+agent_1: Scan vms/lib/payments/ for [pattern]
+agent_2: Scan vms/lib/bears/ for [pattern]
 ```
 
-**Feature-Based**: Complete features → 1 agent per feature
+**File-Based** (for implementation tasks):
 ```yaml
-agent_1: User authentication (DB + API + UI + tests)
-agent_2: User profile (DB + API + UI + tests)
-agent_3: User settings (DB + API + UI + tests)
+agent_0: [UserCard.tsx, UserCard.test.tsx]
+agent_1: [ProductCard.tsx, ProductCard.test.tsx]
 ```
 
-**Layer-Based**: Architectural layers → 1 agent per layer
+**Feature-Based** (for complete features):
 ```yaml
-agent_1: Database models + migrations
-agent_2: API endpoints + business logic
-agent_3: Frontend components + state
-agent_4: Integration tests + E2E
+agent_0: Auth backend (models + API)
+agent_1: Auth frontend (components + state)
+agent_2: Auth tests (unit + integration)
 ```
 
-**Chain Processing**: If >3 agents needed
-```yaml
-# Example: 7 agents total
-batch_1: [agent_1, agent_2, agent_3]  # Execute first
-batch_2: [agent_4, agent_5, agent_6]  # Execute after batch_1 completes
-batch_3: [agent_7]                     # Execute after batch_2 completes
-```
+### Step 2: Write Agent Prompts with Checkpoints
 
-### Step 3: Generate Codex Agent Prompts
-For each sub-task, create a structured prompt:
+Every agent prompt MUST include checkpoint instructions so their logs show meaningful progress. Use this template:
 
 ```markdown
-Task: [Specific, atomic task description]
+[Task description — 1-2 sentences, very specific scope]
 
-Context:
-- Working directory: [path]
-- Related files: [list]
-- Dependencies: [list]
-- Existing patterns: [description]
+Work through these steps IN ORDER. After each step, print a checkpoint line.
 
-Requirements:
-- Functional: [what the code should do]
-- Testing: [required test coverage]
-- Style: [code style guide]
+## Step 1: [First focused subtask]
+[Specific instructions — what to look at, what patterns to match]
+When done, print: "=== CHECKPOINT 1/N: [step name] — [count] findings ==="
 
-Success Criteria:
-- [ ] Implementation complete
-- [ ] Tests passing
-- [ ] Lint/type-check passing
-- [ ] Documentation updated
+## Step 2: [Second focused subtask]
+[Specific instructions]
+When done, print: "=== CHECKPOINT 2/N: [step name] — [count] findings ==="
 
-Output Format:
-1. Summary of changes
-2. Files modified/created
-3. Test results
-4. Any issues encountered
+## Step N: Compile Results
+Compile all findings into a structured list. For each finding output:
+- File path and line number
+- The pattern/code
+- Severity
+- One-line description
+
+Print: "=== COMPLETE: [total] findings ==="
 ```
 
-### Step 4: Setup Logging Infrastructure
-Before executing agents, prepare the logging system:
+**Why checkpoints matter:** The MCP server streams agent stdout to log files in real-time. When the orchestrator polls `check_agents_status`, it reads the tail of each log. Checkpoint lines make it immediately clear how far each agent has progressed.
 
-**Create logging directory:**
-```bash
-# Generate timestamp-based directory
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR=".codex-temp/${TIMESTAMP}"
-mkdir -p "${LOG_DIR}"
+### Step 3: Launch Agents (Non-Blocking)
+
 ```
-
-**Log file naming convention:**
-```
-.codex-temp/
-  └── 20251107_152300/          # Timestamp-based subdirectory
-      ├── user-auth.log         # Function-based naming
-      ├── user-profile.log
-      ├── api-endpoints.log
-      └── frontend-components.log
-```
-
-### Step 5: Initialize TodoWrite Progress Tracking
-Create a comprehensive todo list showing all tasks (including chain batches):
-
-```markdown
-TodoWrite([
-  { content: "Execute batch 1: agents 1-3", status: "pending", activeForm: "Executing batch 1" },
-  { content: "Agent 1: User authentication", status: "pending", activeForm: "Working on user authentication" },
-  { content: "Agent 2: User profile", status: "pending", activeForm: "Working on user profile" },
-  { content: "Agent 3: API endpoints", status: "pending", activeForm: "Working on API endpoints" },
-  { content: "Execute batch 2: agents 4-6", status: "pending", activeForm: "Executing batch 2" },
-  { content: "Agent 4: Frontend components", status: "pending", activeForm: "Working on frontend" },
-  { content: "Agent 5: State management", status: "pending", activeForm: "Working on state" },
-  { content: "Agent 6: Integration tests", status: "pending", activeForm: "Working on tests" },
-  { content: "Merge and validate results", status: "pending", activeForm: "Merging results" }
-])
-```
-
-### Step 6: Execute Parallel Delegation with Chain Processing
-Use chain processing for >3 agents:
-
-**For ≤3 agents (Direct execution):**
-```javascript
-mcp__codex-subagent__spawn_agents_parallel({
+mcp__codex-subagent__spawn_agents_async({
   agents: [
-    { prompt: "Agent 1 prompt..." },
-    { prompt: "Agent 2 prompt..." },
-    { prompt: "Agent 3 prompt..." }
-  ]
+    { prompt: "...", label: "short-name-0" },
+    { prompt: "...", label: "short-name-1" },
+    { prompt: "...", label: "short-name-2" }
+  ],
+  log_dir: ".codex-temp/descriptive-name"  // optional
 })
 ```
 
-**For >3 agents (Chain processing):**
-```javascript
-// Batch 1 (agents 1-3)
-TodoWrite: Mark "Execute batch 1" as in_progress
-const batch1_results = await mcp__codex-subagent__spawn_agents_parallel({
-  agents: [
-    { prompt: "Agent 1 prompt..." },
-    { prompt: "Agent 2 prompt..." },
-    { prompt: "Agent 3 prompt..." }
-  ]
+This returns immediately with:
+- `job_id` — use for polling
+- `log_dir` — where logs stream to
+- `tail_command` — user can run this in another terminal
+
+**Tell the user** the tail command so they can watch live if they want.
+
+### Step 4: Monitor Progress (Polling Loop)
+
+Poll every 20-30 seconds until all agents complete:
+
+```
+mcp__codex-subagent__check_agents_status({
+  job_id: "<job_id>",
+  tail_lines: 15
 })
-// Log results to .codex-temp/[timestamp]/agent-1.log, agent-2.log, agent-3.log
-TodoWrite: Mark batch 1 agents as completed, mark "Execute batch 1" as completed
-
-// Display progress update to user
-Report: "✅ Batch 1 completed (3/7 agents) - User auth, profile, API done"
-
-// Batch 2 (agents 4-6)
-TodoWrite: Mark "Execute batch 2" as in_progress
-const batch2_results = await mcp__codex-subagent__spawn_agents_parallel({
-  agents: [
-    { prompt: "Agent 4 prompt..." },
-    { prompt: "Agent 5 prompt..." },
-    { prompt: "Agent 6 prompt..." }
-  ]
-})
-// Log results to .codex-temp/[timestamp]/agent-4.log, agent-5.log, agent-6.log
-TodoWrite: Mark batch 2 agents as completed, mark "Execute batch 2" as completed
-
-// Display progress update to user
-Report: "✅ Batch 2 completed (6/7 agents) - Frontend, state, tests done"
-
-// Batch 3 (agent 7)
-TodoWrite: Mark "Execute batch 3" as in_progress
-const batch3_results = await mcp__codex-subagent__spawn_agents_parallel({
-  agents: [
-    { prompt: "Agent 7 prompt..." }
-  ]
-})
-// Log results to .codex-temp/[timestamp]/agent-7.log
-TodoWrite: Mark batch 3 agents as completed, mark "Execute batch 3" as completed
-
-// Display final progress
-Report: "✅ All batches completed (7/7 agents)"
 ```
 
-**Logging format for each agent:**
-```markdown
-=== Agent: [function-name] ===
-Start Time: [timestamp]
-Task: [description]
+After each poll, **report to the user** what you see:
+- Which agents are still running vs completed
+- What step each running agent is on (from checkpoint lines in logs)
+- Any findings or errors so far
+- Elapsed time
 
---- Prompt ---
-[Full prompt sent to agent]
-
---- Output ---
-[Agent's complete output]
-
---- Files Modified ---
-[List of modified files]
-
---- Status ---
-Success: [true/false]
-End Time: [timestamp]
-Duration: [seconds]
-
---- Errors (if any) ---
-[Error messages]
+Example update to user:
+```
+**Progress (45s elapsed, 1/3 done):**
+- agent-0 (comments): Done — 3 findings (28s)
+- agent-1 (payments): Step 2/3 — scanning processors/types/
+- agent-2 (bears): Step 1/3 — scanning models/deviation/
 ```
 
-### Step 7: Collect and Analyze Results
-After each batch completion, parse agent outputs:
-- Extract files modified/created
-- Extract test results
-- Identify any errors or warnings
-- Build file change map to detect conflicts
-- Write detailed logs to `.codex-temp/[timestamp]/[agent-name].log`
+**Stop polling when** `all_done: true` in the response.
 
-**Conflict Detection:**
-```yaml
-conflict_types:
-  - file_level: Multiple agents modified same file
-  - line_level: Overlapping line ranges
-  - semantic: Changes to same function/class
-  - dependency: Agent B depends on Agent A's changes
-```
+### Step 5: Collect Results
 
-### Step 8: Apply Merge Strategy
+When all agents are done, `check_agents_status` returns `full_output` for each agent. Compile the results:
 
-**Strategy A: Direct Merge** (No conflicts)
-- Apply all changes in parallel
-- Run linter + formatter
-- Run tests
-- Commit with structured message
+1. Parse each agent's output
+2. Deduplicate findings that overlap
+3. Sort by severity/priority
+4. Present a merged summary to the user
 
-**Strategy B: Sequential Integration** (Has dependencies)
-- Sort by dependency graph
-- Apply in order: DB → Backend → Frontend → Tests
-- Validate after each step
-- Rollback on failure
+### Step 6: Chain Batches (if needed)
 
-**Strategy C: Conflict Resolution** (Overlapping changes)
-- Analyze intent of each change
-- Apply merge heuristics:
-  - Import statements: Merge all, deduplicate
-  - Function additions: Merge both
-  - Function modifications: Prioritize by logic
-  - Type definitions: Merge fields, flag conflicts
-- Request human review for ambiguous conflicts
+If the task requires >3 agents:
+1. Launch batch 1 (up to 3 agents)
+2. Monitor until complete
+3. Report batch 1 results
+4. Launch batch 2 with any context from batch 1
+5. Repeat
 
-**Strategy D: Incremental Validation** (High-risk)
-- Apply in small batches
-- Run full test suite after each batch
-- Rollback failed batches
-- Report success rate
+## Agent Prompt Guidelines
 
-### Step 9: Quality Validation
+**Keep prompts focused:**
+- 1-3 directories max per agent
+- Specific patterns to search for (not "find all bugs")
+- Concrete output format (file, line, description)
+- Limit on findings count (e.g., "limit to 10 strongest")
 
-Run these quality gates:
+**Include checkpoint instructions in every prompt:**
+- Explicit step-by-step structure
+- "Print checkpoint after each step" instruction
+- Final "=== COMPLETE ===" marker
 
-**Gate 1: Pre-Merge**
-- ✅ All agents completed successfully
-- ✅ No critical errors in outputs
-- ✅ File paths are valid
-
-**Gate 2: Compilation**
-- ✅ Code compiles/transpiles
-- ✅ Build succeeds
-- ✅ No missing dependencies
-
-**Gate 3: Static Analysis**
-- ✅ Linter passes
-- ✅ Type-checker passes
-- ✅ Formatter applied
-- ✅ No security vulnerabilities
-
-**Gate 4: Testing**
-- ✅ Unit tests pass (100% for new code)
-- ✅ Integration tests pass
-- ✅ E2E tests pass (if applicable)
-
-**Gate 5: Code Quality**
-- ⚠️ No console.log or debug statements
-- ⚠️ Proper error handling
-- ⚠️ Documentation updated
-- ⚠️ No commented-out code
-
-### Step 10: Generate Report
-
-Provide a comprehensive report:
-
-```markdown
-# Codex Subagents Orchestration Results
-
-## Summary
-- **Task:** [Original task]
-- **Agents:** [N] agents executed in [B] batches
-- **Duration:** [Total time]
-- **Status:** ✅ Success | ⚠️ Partial | ❌ Failed
-- **Logs:** `.codex-temp/[timestamp]/` (contains detailed logs for each agent)
-
-## Batch Execution Progress
-| Batch | Agents | Status | Duration |
-|-------|--------|--------|----------|
-| 1     | 1-3    | ✅     | 45s      |
-| 2     | 4-6    | ✅     | 38s      |
-| 3     | 7      | ✅     | 15s      |
-
-## Agent Results
-| Agent | Task | Status | Files | Tests |
-|-------|------|--------|-------|-------|
-| 1     | ...  | ✅     | 3     | 15/15 |
-| 2     | ...  | ✅     | 2     | 8/8   |
-| 3     | ...  | ⚠️     | 1     | 3/4   |
-
-## Merge Summary
-- **Strategy:** [Strategy used]
-- **Conflicts:** [Number and severity]
-- **Files Changed:** [Count]
-- **Lines Changed:** +[add] -[del]
-
-## Validation Results
-✅ Compilation: Passed
-✅ Linting: Passed
-✅ Type-checking: Passed
-✅ Tests: 45/45 passed
-
-## Changes Made
-[List of files created/modified]
-
-## Next Steps
-- [ ] Review conflict resolutions (if any)
-- [ ] Run E2E tests manually
-- [ ] Update documentation
-- [ ] Deploy to staging
-
-## Recommendations
-[Suggestions for improvements]
-```
+**Include context the agent needs:**
+- Full file paths (agents don't share your context)
+- Specific function/class names to look for
+- Examples of the pattern from other files if available
 
 ## Error Handling
 
-**If agent fails:**
-1. Log failure details
-2. Retry once with refined prompt
-3. If still fails, flag for manual completion
-4. Continue with other agents
+**If an agent fails:**
+1. Report the error from the log file
+2. Decide whether to retry with a refined prompt or skip
+3. Continue monitoring remaining agents
 
-**If merge conflicts:**
-1. Create conflict report with context
-2. Highlight conflicting regions
-3. Suggest resolution strategies
-4. Request human decision
-
-**If tests fail:**
-1. Identify failing tests
-2. Analyze which agent caused failure
-3. Rollback specific changes
-4. Re-run agent with test context
+**If an agent is slow (>3 minutes):**
+1. Report to user what the agent's log shows
+2. Ask if they want to wait or kill it
+3. Partial results from the log file are preserved either way
 
 ## Best Practices
 
-**DO:**
-- ✅ Break into atomic, independent units
-- ✅ Limit to 3 agents per batch (chain if >3 needed)
-- ✅ Use TodoWrite to track all tasks and batches
-- ✅ Log all agent activities to `.codex-temp/[timestamp]/`
-- ✅ Update progress after each batch completion
-- ✅ Provide clear context to agents
-- ✅ Validate incrementally after each batch
-- ✅ Document merge decisions
-- ✅ Keep checkpoints for rollback
-
-**DON'T:**
-- ❌ Execute >3 agents in a single batch
-- ❌ Skip progress updates between batches
-- ❌ Forget to log agent outputs
-- ❌ Create dependencies between parallel agents
-- ❌ Skip validation steps
-- ❌ Ignore test failures
-- ❌ Over-decompose (increases merge complexity)
-
-## Performance Tips
-
-- **Batch size:** Max 3 agents per batch (prevents MCP content overflow)
-- **Chain processing:** For >3 agents, execute in sequential batches of 3
-- **Progress tracking:** Use TodoWrite to show batch progress to user
-- **Logging:** Store all outputs in `.codex-temp/[timestamp]/` for debugging
-- **Token efficiency:** Reference files by path, not content
-- **Caching:** Reuse project structure analysis across batches
-- **Parallel execution:** Run independent operations within each batch
+- Keep agents small and focused — 30-90 seconds each is ideal
+- Always include checkpoint instructions in prompts
+- Poll every 20-30 seconds (not too fast, not too slow)
+- Report progress to user after every poll
+- Use descriptive labels for agents (shown in status output)
+- Use descriptive log_dir names (not just timestamps)
+- Max 3 agents per batch
 
 ---
 
