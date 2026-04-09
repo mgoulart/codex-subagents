@@ -72,7 +72,7 @@ def _resolve_codex_executable() -> str:
 
 
 @mcp.tool()
-async def spawn_agent(ctx: Context, prompt: str) -> str:
+async def spawn_agent(ctx: Context, prompt: str, model: str = "") -> str:
     """Spawn a Codex agent to work inside the current working directory.
 
     The server resolves the working directory via ``os.path.realpath(os.getcwd())``
@@ -80,6 +80,8 @@ async def spawn_agent(ctx: Context, prompt: str) -> str:
 
     Args:
         prompt: All instructions/context the agent needs for the task.
+        model: Optional model override (e.g. "o3", "gpt-4o"). Uses the Codex
+               CLI default model from ~/.codex/config.toml when not specified.
 
     Returns:
         The agent's final response (clean output from Codex CLI).
@@ -112,8 +114,10 @@ async def spawn_agent(ctx: Context, prompt: str) -> str:
             "--dangerously-bypass-approvals-and-sandbox",
             "--output-last-message",
             str(output_path),
-            prompt,
         ]
+        if model and isinstance(model, str) and model.strip():
+            cmd += ["--model", model.strip()]
+        cmd.append(prompt)
 
         # Initial progress ping
         try:
@@ -219,6 +223,7 @@ async def spawn_agents_parallel(
                 }
 
             prompt = spec.get("prompt", "")
+            model = spec.get("model", "")
 
             # Report progress for this agent
             try:
@@ -231,7 +236,7 @@ async def spawn_agents_parallel(
                 pass
 
             # Run the agent
-            output = await spawn_agent(ctx, prompt)
+            output = await spawn_agent(ctx, prompt, model)
 
             # Check if output contains an error
             if output.startswith("Error:"):

@@ -96,6 +96,31 @@ After installation, restart Claude Code to use.
 /codex-subagents <task description>
 ```
 
+### Per-Agent Model Selection
+
+Each agent in a batch can run a different model by adding a `"model"` key to its spec. The orchestrator passes this to `codex exec --model`:
+
+```javascript
+mcp__codex-subagent__spawn_agents_parallel({
+  agents: [
+    { prompt: "Write the database schema", model: "o3" },
+    { prompt: "Write the API endpoints",   model: "gpt-4o" },
+    { prompt: "Write the UI components"  },  // uses default from ~/.codex/config.toml
+  ]
+})
+```
+
+When no `model` is specified, the agent uses the default configured in `~/.codex/config.toml`. You can also override the default globally by editing that file:
+
+```toml
+model = "o3"
+```
+
+Or per-session via the Codex CLI:
+```bash
+codex config set model o3
+```
+
 ### Examples
 
 **Example 1: Create React Components**
@@ -168,7 +193,14 @@ agent_4: Integration tests + E2E
 
 ## Patched server.py
 
-See `codex-as-mcp-patched/` for a patched version of the MCP server with all critical fixes applied. Refer to the README in that directory for how to use it.
+See `codex-as-mcp-patched/` for a patched version of the MCP server with all fixes applied:
+
+- **stdin=DEVNULL** — prevents the hang bug
+- **No prompt quoting** — correct subprocess arg passing
+- **realpath symlink fix** — macOS /tmp compatibility
+- **Per-agent model selection** — `model` key in agent spec maps to `codex exec --model`
+
+Refer to the README in that directory for how to apply it.
 
 ## Best Practices
 
