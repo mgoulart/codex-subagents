@@ -38,6 +38,9 @@ The orchestrator analyzes your task, splits it into independent units (max 3 age
 /codex-subagents Add user authentication with login, registration, and password reset
 /codex-subagents Migrate all class components to React hooks
 /codex-subagents Add unit tests to the payment module
+/codex-subagents using o3, refactor the auth module
+/codex-subagents use gpt-4o for all agents — add error handling to the API layer
+/codex-subagents agent 1 uses o3 for the DB schema, agent 2 uses gpt-4o for the API
 ```
 
 ## Per-Agent Model Selection
