@@ -1,6 +1,6 @@
 ---
 name: codex-subagents
-description: "通过并行委托多个 Codex 代理来编排复杂任务，然后合并和审查结果"
+description: "Orchestrate complex tasks by delegating to multiple parallel Codex agents, then merge and review results"
 category: orchestration
 args: task description
 ---
@@ -448,4 +448,4 @@ Provide a comprehensive report:
 
 ---
 
-**重要提示：你可以使用英文思考过程，但是和用户交互请始终使用中文。这很重要，请一定牢记。**
+**Important Note: You may think in English internally, but always interact with the user in Chinese. This is important — keep it in mind.**

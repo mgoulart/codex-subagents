@@ -7,36 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-04-09 (mgoulart fork)
+
+### Fixed
+- Critical: add `stdin=asyncio.subprocess.DEVNULL` to prevent codex subprocess from
+  inheriting the MCP server's stdio pipe and blocking indefinitely (stdin hang bug)
+- Fix incorrect prompt quoting in subprocess exec call — `create_subprocess_exec`
+  passes args directly to execvp, so literal quote chars were included in the prompt
+- Fix MCP registration: use `claude mcp add` instead of writing to `mcp_settings.json`
+  (Claude Code does not read from `~/.claude/mcp_settings.json`)
+- Fix symlink install: use `rm -rf` to handle both symlinks and existing directories
+- Resolve symlinks in working directory path using `os.path.realpath()` for macOS compatibility
+- Remove unused `DEFAULT_TIMEOUT_SECONDS` constant
+
+### Added
+- `codex-as-mcp-patched/` directory with patched server.py and explanation of all fixes
+- `.gitignore` at repo root covering `.codex-temp/`, `*.log`, `.DS_Store`
+
+### Changed
+- Translate all Chinese content to English (install.sh, README.md, CHANGELOG.md,
+  CONTRIBUTING.md, CODE_OF_CONDUCT.md)
+- README.md is now a clean English document; Chinese content preserved in README-zh.md
+
 ## [2.0.0] - 2025-11-07
 
 ### Changed (Breaking)
-- 🎉 **重构为标准 Claude Code Plugin 格式**
-- 项目结构重组：
-  - 添加 `.claude-plugin/plugin.json` 元数据文件
-  - 移动命令文件到 `commands/` 目录
-  - 支持通过 `/plugin install` 安装
-- 安装方式更新：
-  - 推荐使用 Plugin 安装方式
-  - 保留手动安装方式作为备选
-  - 更新所有 README 文档的安装说明
+- Refactored to standard Claude Code Plugin format
+- Project structure reorganized:
+  - Added `.claude-plugin/plugin.json` metadata file
+  - Moved command files to `commands/` directory
+  - Supports installation via `/plugin install`
+- Installation method updated:
+  - Plugin installation method is now recommended
+  - Manual installation kept as alternative
+  - Updated all README documentation for new install instructions
 
 ### Added
-- Plugin 管理支持：
-  - 通过 `/plugin install CoderMageFox/claudecode-codex-subagents` 安装
-  - 通过 `/plugin enable/disable` 管理
-  - 通过 `/plugin validate` 验证结构
-- 标准化 Plugin 元数据（plugin.json）
-  - 包含版本、作者、许可证等信息
-  - 声明 MCP 服务器依赖
-  - 定义所需权限
-- 自动安装中英文双版本命令
+- Plugin management support:
+  - Install via `/plugin install CoderMageFox/claudecode-codex-subagents`
+  - Manage via `/plugin enable/disable`
+  - Validate structure via `/plugin validate`
+- Standardized Plugin metadata (`plugin.json`)
+  - Includes version, author, license information
+  - Declares MCP server dependencies
+  - Defines required permissions
+- Auto-install of both Chinese and English command variants
 
 ## [1.0.0] - 2025-11-07
 
 ### Added
 - Initial release of Codex Subagents plugin
 - Parallel agent orchestration with max 3 agents per batch
-- Chain processing for >3 agents with automatic batching
+- Chain processing for more than 3 agents with automatic batching
 - Comprehensive logging system to `.codex-temp/[timestamp]/`
 - Real-time progress tracking via TodoWrite integration
 - Full i18n support (Chinese and English)
@@ -66,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error handling and retry mechanisms
 
 ### Documentation
-- Installation guide with 3 methods (manual, git clone, curl)
+- Installation guide with multiple methods
 - Usage examples and best practices
 - Workflow documentation
 - Troubleshooting guide
@@ -79,5 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - .gitignore for temporary files and logs
 - GitHub badges (License, Stars, Issues, PRs Welcome)
 
-[Unreleased]: https://github.com/CoderMageFox/claudecode-codex-subagents/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mgoulart/codex-subagents/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/mgoulart/codex-subagents/releases/tag/v3.0.0
+[2.0.0]: https://github.com/CoderMageFox/claudecode-codex-subagents/releases/tag/v2.0.0
 [1.0.0]: https://github.com/CoderMageFox/claudecode-codex-subagents/releases/tag/v1.0.0

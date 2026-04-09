@@ -79,19 +79,13 @@ Add to `~/.claude/settings.json`:
 
 #### Step 3: Configure MCP Server
 
-Manually add to `~/.claude/mcp_settings.json`:
+Run the following command to register the MCP server correctly:
 
-```json
-{
-  "mcpServers": {
-    "codex-subagent": {
-      "command": "uvx",
-      "args": ["codex-as-mcp@latest"],
-      "transport": "stdio"
-    }
-  }
-}
+```bash
+claude mcp add --scope user codex-subagent --transport stdio -- uvx codex-as-mcp@latest
 ```
+
+> **Note:** Do NOT manually write to `~/.claude/mcp_settings.json` — Claude Code does not read from that file. Use `claude mcp add` or edit `~/.claude.json` directly.
 
 #### Step 4: Restart Claude Code
 

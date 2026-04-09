@@ -1,333 +1,209 @@
 # Codex Subagents - Claude Code Plugin
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/CoderMageFox/claudecode-codex-subagents?style=social)](https://github.com/CoderMageFox/claudecode-codex-subagents)
-[![GitHub Issues](https://img.shields.io/github/issues/CoderMageFox/claudecode-codex-subagents)](https://github.com/CoderMageFox/claudecode-codex-subagents/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/CoderMageFox/claudecode-codex-subagents/pulls)
+[![GitHub Stars](https://img.shields.io/github/stars/mgoulart/codex-subagents?style=social)](https://github.com/mgoulart/codex-subagents)
+[![GitHub Issues](https://img.shields.io/github/issues/mgoulart/codex-subagents)](https://github.com/mgoulart/codex-subagents/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/mgoulart/codex-subagents/pulls)
 
-[中文](./README-zh.md) | [English](./README-en.md)
+A Claude Code plugin for orchestrating complex tasks by delegating to multiple parallel Codex agents, then merging and reviewing results.
 
-通过并行委托多个 Codex 代理来编排复杂任务，然后合并和审查结果的 Claude Code 插件。
+**Forked from [CoderMageFox/claudecode-codex-subagents](https://github.com/CoderMageFox/claudecode-codex-subagents)** — this fork fixes critical bugs (stdin hang, incorrect MCP registration) and translates all content to English.
 
-## 功能特点
+## Features
 
-- 🚀 **并行处理**: 将复杂任务分解为可并行执行的单元（每批最多3个代理）
-- 🔗 **链式处理**: 超过3个任务时自动进行链式批量处理
-- 📊 **实时进度**: 使用 TodoWrite 实时显示任务执行进度
-- 📝 **详细日志**: 所有子代理活动记录到 `.codex-temp/[时间戳]/` 目录
-- 🤖 **智能委托**: 通过 MCP 服务器自动委托给多个 Codex 子代理
-- 🔄 **智能合并**: 自动检测冲突并应用最佳合并策略
-- ✅ **质量验证**: 包含编译、测试、代码质量等多重验证关卡
+- **Parallel Processing**: Break complex tasks into parallelizable units (max 3 agents per batch)
+- **Chain Processing**: Automatic chain batch processing when more than 3 tasks are needed
+- **Real-time Progress**: Uses TodoWrite to display task execution progress in real-time
+- **Detailed Logging**: All subagent activities logged to `.codex-temp/[timestamp]/` directory
+- **Intelligent Delegation**: Automatically delegates to multiple Codex subagents via MCP server
+- **Smart Merging**: Automatically detects conflicts and applies optimal merge strategies
+- **Quality Validation**: Multiple validation gates including compilation, testing, and code quality checks
 
-## 快速安装
+## Bugs Fixed in This Fork
 
-### 方式 1：一键安装脚本（推荐）
+### Critical Fix: stdin Hang
 
-**适合：首次使用，希望全自动安装**
+The original `codex-as-mcp` server did not pass `stdin=asyncio.subprocess.DEVNULL` when spawning child `codex exec` processes. This caused the child process to inherit the MCP server's stdin (Claude Code's stdio pipe), which caused it to block waiting for input and hang indefinitely.
+
+**Fix:** `stdin=asyncio.subprocess.DEVNULL` is added to the `asyncio.create_subprocess_exec` call. See `codex-as-mcp-patched/server.py` for the full patched version.
+
+### Fix: Incorrect MCP Registration
+
+The original `install.sh` wrote MCP server config to `~/.claude/mcp_settings.json`. Claude Code does **not** read from that file — it reads MCP config from `~/.claude.json` via the `claude mcp add` command.
+
+**Fix:** The install script now uses `claude mcp add --scope user codex-subagent --transport stdio -- uvx codex-as-mcp@latest`.
+
+### Fix: Symlink Install May Fail if Directory Exists
+
+The original install script only checked for `-L` (symlink) before removing the existing install entry, not for regular directories. Using `rm -f` on a directory would fail silently or error.
+
+**Fix:** The check now handles both symlinks and directories, using `rm -rf` to cleanly remove either.
+
+### Fix: Unnecessary Prompt Quoting
+
+The original server wrapped the prompt in `"..."` before passing to `create_subprocess_exec`. Since `create_subprocess_exec` passes args directly to `execvp` (no shell), the literal quote characters were included in the prompt text.
+
+**Fix:** The prompt is passed directly without additional quoting.
+
+## Quick Installation
+
+### Method 1: One-Click Install Script (Recommended)
 
 ```bash
-git clone https://github.com/CoderMageFox/claudecode-codex-subagents.git
-cd claudecode-codex-subagents
+git clone https://github.com/mgoulart/codex-subagents.git
+cd codex-subagents
 ./install.sh
 ```
 
-**安装脚本会自动完成：**
-- ✅ 检测并自动安装缺失的依赖（Python 3, uv, Codex CLI）
-- ✅ 安装 Plugin 到 `~/.claude/plugins/`
-- ✅ **复制命令到 `~/.claude/commands/` 以确保直接可用**
-- ✅ 配置 MCP 服务器（无需手动安装）
-- ✅ 自动安装中英文双版本命令
-- ✅ 验证安装完整性
+The installation script automatically:
+- Detects and auto-installs missing dependencies (Python 3, uv, Codex CLI)
+- Installs the Plugin to `~/.claude/plugins/`
+- Copies commands to `~/.claude/commands/` for immediate availability
+- Configures the MCP server using `claude mcp add` (correct method)
+- Installs both English command variants
+- Verifies installation integrity
 
-### 方式 2：通过 Claude Code Plugin 系统安装
+### Method 2: Manual MCP Registration
 
-**适合：熟悉 Claude Code plugin 系统，希望使用 plugin 管理**
-
-#### 步骤 1：添加 Plugin Marketplace
-
-在 Claude Code 中运行：
+If you prefer to configure manually, use the `claude mcp add` command:
 
 ```bash
-# 方式 A: 通过 GitHub URL 添加
-/plugin marketplace add CoderMageFox/claudecode-codex-subagents
-
-# 方式 B: 或者在 settings.json 中添加
+claude mcp add --scope user codex-subagent --transport stdio -- uvx codex-as-mcp@latest
 ```
 
-在 `~/.claude/settings.json` 中添加：
-
-```json
-{
-  "extraKnownMarketplaces": [
-    {
-      "name": "codex-subagents",
-      "url": "https://github.com/CoderMageFox/claudecode-codex-subagents"
-    }
-  ]
-}
-```
-
-#### 步骤 2：安装 Plugin
+Then copy the command files:
 
 ```bash
-# 从 marketplace 安装
-/plugin install codex-subagents@CoderMageFox
-
-# 或者直接通过 GitHub 路径安装
-/plugin install CoderMageFox/claudecode-codex-subagents
+mkdir -p ~/.claude/commands
+cp commands/codex-subagents.md ~/.claude/commands/
+cp commands/codex-subagents-en.md ~/.claude/commands/
 ```
 
-#### 步骤 3：配置 MCP 服务器
+> **Note:** Do NOT manually edit `~/.claude/mcp_settings.json` — Claude Code does not read that file. Always use `claude mcp add` or edit `~/.claude.json` directly.
 
-手动在 `~/.claude/mcp_settings.json` 中添加：
-
-```json
-{
-  "mcpServers": {
-    "codex-subagent": {
-      "command": "uvx",
-      "args": ["codex-as-mcp@latest"],
-      "transport": "stdio"
-    }
-  }
-}
-```
-
-#### 步骤 4：重启 Claude Code
-
-```bash
-# 退出当前会话
-exit
-
-# 重新启动 Claude Code
-claude
-```
-
-#### 步骤 5：验证安装
-
-```bash
-# 验证 plugin 结构
-/plugin validate
-
-# 检查 MCP 服务器状态
-/mcp
-
-# 测试命令
-/codex-subagents 测试任务
-```
-
-### 方式对比
-
-| 特性 | 一键安装脚本 | Plugin 系统安装 |
-|------|------------|----------------|
-| 安装难度 | ⭐ 简单 | ⭐⭐⭐ 中等 |
-| 自动配置 | ✅ 全自动 | ❌ 需手动配置 MCP |
-| 依赖安装 | ✅ 自动检测安装 | ❌ 需手动安装 |
-| 命令可用性 | ✅ 立即可用 | ✅ 重启后可用 |
-| Plugin 管理 | ⚠️ 手动更新 | ✅ 支持 `/plugin update` |
-| 适用场景 | 快速开始 | 企业团队管理 |
-
-**前置要求：**
-- Python 3 (macOS 通常自带，脚本会自动检测)
-- uv (脚本会提示并自动安装)
-- Codex CLI >= 0.46.0 (脚本会提示并自动安装)
+**Prerequisites:**
+- Python 3 (usually pre-installed on macOS, script will auto-detect)
+- uv / uvx (script will prompt and auto-install)
+- Codex CLI >= 0.46.0 (script will prompt and auto-install)
 - Claude Code CLI
 
-> 💡 **提示**: 如果缺少依赖，安装脚本会自动检测并询问是否安装，无需手动准备！
+After installation, restart Claude Code to use.
 
-安装完成后，重启 Claude Code 即可使用。
+## Usage
 
-## 使用方法
-
-### 基本用法
+### Commands
 
 ```bash
-/codex-subagents <任务描述>
+/codex-subagents-en <task description>   # English version
+/codex-subagents <task description>      # Chinese version (original)
 ```
 
-### 示例
+### Examples
 
-**示例 1: 创建 React 组件**
-```bash
-/codex-subagents 创建用户认证系统，包括登录、注册和密码重置功能
+**Example 1: Create React Components**
+```
+/codex-subagents-en Create a user authentication system with login, registration, and password reset features
 ```
 
-**示例 2: 重构代码**
-```bash
-/codex-subagents 将所有 React 类组件迁移到函数组件和 Hooks
+**Example 2: Refactor Code**
+```
+/codex-subagents-en Migrate all React class components to function components and Hooks
 ```
 
-**示例 3: 添加功能**
-```bash
-/codex-subagents 为博客系统添加评论、点赞和分享功能
+**Example 3: Add Features**
+```
+/codex-subagents-en Add comments, likes, and sharing features to the blog system
 ```
 
-## 工作流程
+## How It Works
 
-1. **任务分析** (30秒): 理解任务范围和依赖关系
-2. **任务分解** (1分钟): 将任务拆分为并行单元（每批最多3个）
-3. **初始化日志**: 创建 `.codex-temp/[timestamp]/` 目录用于记录
-4. **设置进度跟踪**: 使用 TodoWrite 创建任务列表
-5. **链式执行**:
-   - 如果 ≤3 个代理：直接并行执行
-   - 如果 >3 个代理：分批链式执行（每批3个）
-6. **实时进度更新**: 每批完成后更新 TodoWrite 并向用户报告
-7. **详细日志记录**: 每个代理的输出记录到独立的日志文件
-8. **收集结果**: 解析每个代理的输出并检测冲突
-9. **应用合并策略**:
-   - **直接合并**: 无冲突时
-   - **顺序集成**: 有依赖关系时
-   - **冲突解决**: 有重叠更改时
-   - **增量验证**: 高风险时
-10. **质量验证**: 运行编译、lint、类型检查和测试
-11. **生成报告**: 提供全面的执行报告（包含日志目录路径）
+1. **Task Analysis** (30 seconds): Understand task scope and dependencies
+2. **Task Decomposition** (1 minute): Break task into parallel units (max 3 per batch)
+3. **Initialize Logging**: Create `.codex-temp/[timestamp]/` directory for logs
+4. **Setup Progress Tracking**: Use TodoWrite to create a task list
+5. **Chain Execution**:
+   - If 3 or fewer agents: Execute directly in parallel
+   - If more than 3 agents: Execute in batches of 3
+6. **Real-time Progress Updates**: Update TodoWrite and report to user after each batch
+7. **Detailed Logging**: Each agent's output recorded to individual log file
+8. **Collect Results**: Parse each agent's output and detect conflicts
+9. **Apply Merge Strategy**: Direct merge, sequential integration, or conflict resolution
+10. **Quality Validation**: Run compilation, lint, type-check, and tests
+11. **Generate Report**: Provide comprehensive execution report with log directory path
 
-## 任务分解策略
+## Logging
 
-### 基于文件 (File-Based)
-独立文件 → 每组文件一个代理
+Agent logs are stored in `.codex-temp/[timestamp]/`:
+
+```
+.codex-temp/
+  └── 20251107_152300/
+      ├── user-auth.log
+      ├── user-profile.log
+      ├── api-endpoints.log
+      └── frontend-components.log
+```
+
+Add `.codex-temp/` to your project's `.gitignore` to avoid committing temporary files. The plugin commands do this automatically when first run.
+
+## Task Decomposition Strategies
+
+**File-Based**: Independent files, 1 agent per file group
 ```yaml
 agent_1: [UserCard.tsx, UserCard.test.tsx]
 agent_2: [ProductCard.tsx, ProductCard.test.tsx]
 ```
 
-### 基于功能 (Feature-Based)
-完整功能 → 每个功能一个代理
+**Feature-Based**: Complete features, 1 agent per feature
 ```yaml
-agent_1: 用户认证 (DB + API + UI + tests)
-agent_2: 用户资料 (DB + API + UI + tests)
+agent_1: User authentication (DB + API + UI + tests)
+agent_2: User profile (DB + API + UI + tests)
 ```
 
-### 基于分层 (Layer-Based)
-架构层 → 每层一个代理
+**Layer-Based**: Architectural layers, 1 agent per layer
 ```yaml
-agent_1: 数据库模型 + 迁移
-agent_2: API 端点 + 业务逻辑
-agent_3: 前端组件 + 状态
-agent_4: 集成测试 + E2E
+agent_1: Database models + migrations
+agent_2: API endpoints + business logic
+agent_3: Frontend components + state
+agent_4: Integration tests + E2E
 ```
 
-## 链式处理与日志记录
+## Patched server.py
 
-### 批量处理策略
-当任务需要超过3个代理时，系统会自动启用链式处理：
+See `codex-as-mcp-patched/` for a patched version of the MCP server with all critical fixes applied. Refer to the README in that directory for how to use it.
 
-**示例：7个代理的任务**
-```yaml
-批次 1: [代理 1-3] → 执行并记录日志 → 更新进度 → 向用户报告
-批次 2: [代理 4-6] → 执行并记录日志 → 更新进度 → 向用户报告
-批次 3: [代理 7]   → 执行并记录日志 → 更新进度 → 向用户报告
-```
+## Best Practices
 
-### 日志目录结构
-```
-.codex-temp/
-  └── 20251107_152300/          # 基于时间戳的子目录
-      ├── user-auth.log         # 基于功能的命名
-      ├── user-profile.log      # 每个代理一个日志文件
-      ├── api-endpoints.log
-      └── frontend-components.log
-```
+**Do:**
+- Break tasks into atomic, independent units
+- Max 3 agents per batch (avoid MCP content overflow)
+- Use TodoWrite to track all tasks and batches
+- Check detailed logs in `.codex-temp/[timestamp]/`
+- Provide clear context to agents
 
-### 日志内容格式
-每个日志文件包含：
-- 代理任务描述
-- 完整的提示词
-- 代理输出内容
-- 修改的文件列表
-- 执行状态和时长
-- 错误信息（如有）
+**Do Not:**
+- Execute more than 3 agents in a single batch
+- Create dependencies between parallel agents
+- Skip validation steps
+- Ignore test failures
 
-### 进度跟踪
-使用 TodoWrite 实时显示：
-- 当前批次执行状态
-- 每个代理的完成情况
-- 总体任务进度
-- 批次间的状态更新
+## Contributing
 
-## 质量验证关卡
+Issues and Pull Requests are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-1. **预合并检查**: 所有代理成功完成，无关键错误
-2. **编译检查**: 代码编译/转译成功
-3. **静态分析**: Lint、类型检查、格式化
-4. **测试检查**: 单元测试、集成测试、E2E 测试
-5. **代码质量**: 无调试语句、正确的错误处理、文档更新
-
-## 最佳实践
-
-**应该做的:**
-- ✅ 将任务拆分为原子、独立的单元
-- ✅ 每批最多3个代理（避免 MCP 内容溢出）
-- ✅ 使用 TodoWrite 跟踪所有任务和批次
-- ✅ 查看 `.codex-temp/[timestamp]/` 中的详细日志
-- ✅ 每批完成后更新进度
-- ✅ 为代理提供清晰的上下文
-- ✅ 每批后进行增量验证
-- ✅ 记录合并决策
-- ✅ 保留回滚检查点
-
-**不应该做的:**
-- ❌ 单批执行超过3个代理
-- ❌ 跳过批次间的进度更新
-- ❌ 忘记记录代理输出
-- ❌ 在并行代理间创建依赖
-- ❌ 跳过验证步骤
-- ❌ 忽略测试失败
-- ❌ 过度分解任务（增加合并复杂度）
-
-## 性能优化建议
-
-- **批次大小**: 每批最多3个代理（防止 MCP 内容溢出）
-- **链式处理**: 超过3个代理时，按批次顺序执行
-- **进度跟踪**: 使用 TodoWrite 向用户显示批次进度
-- **详细日志**: 将所有输出存储在 `.codex-temp/[timestamp]/` 用于调试
-- **令牌效率**: 通过路径引用文件，而非内容
-- **缓存复用**: 在批次间重用项目结构分析
-- **批内并行**: 在每个批次内并行运行独立操作
-
-## 故障排除
-
-### 代理执行失败
-1. 查看失败详情
-2. 使用优化的提示重试一次
-3. 如仍失败，标记为需手动完成
-4. 继续执行其他代理
-
-### 合并冲突
-1. 创建包含上下文的冲突报告
-2. 突出显示冲突区域
-3. 建议解决策略
-4. 请求人工决策
-
-### 测试失败
-1. 识别失败的测试
-2. 分析是哪个代理导致的失败
-3. 回滚特定更改
-4. 使用测试上下文重新运行代理
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 许可证
+## License
 
 MIT License
 
-## 作者
+## Credits
 
-CoderMageFox
+Original plugin by [CoderMageFox](https://github.com/CoderMageFox/claudecode-codex-subagents).
 
-## 链接
+This fork adds bug fixes and English translation.
 
-- [GitHub Repository](https://github.com/CoderMageFox/claudecode-codex-subagents)
-- [Claude Code 官方文档](https://docs.claude.com/claude-code)
-- [报告问题](https://github.com/CoderMageFox/claudecode-codex-subagents/issues)
+## Links
 
-## 社区与反馈
-
-**微信问题反馈群：**
-
-<div align="center">
-  <img src="./assets/wechat-qrcode.jpg" alt="微信问题反馈群" width="200"/>
-  <p><em>扫码加入微信群，获取帮助和反馈问题</em></p>
-</div>
+- [Original Repository](https://github.com/CoderMageFox/claudecode-codex-subagents)
+- [This Fork](https://github.com/mgoulart/codex-subagents)
+- [Claude Code Documentation](https://docs.claude.com/claude-code)
+- [Report Issues](https://github.com/mgoulart/codex-subagents/issues)
