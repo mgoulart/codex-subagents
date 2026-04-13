@@ -222,7 +222,8 @@ echo ""
 # NOTE: Claude Code reads MCP config from ~/.claude.json via 'claude mcp add',
 # NOT from ~/.claude/mcp_settings.json. Using the CLI ensures correct registration.
 echo -e "${YELLOW}[4/6] Configuring MCP server...${NC}"
-claude mcp add --scope user codex-subagent --transport stdio -- uvx codex-as-mcp@latest
+UVX_PATH="$(which uvx 2>/dev/null || echo "$HOME/.local/bin/uvx")"
+claude mcp add --scope user codex-subagent --transport stdio -- "$UVX_PATH" codex-as-mcp@latest
 echo -e "${GREEN}✓ MCP server configured${NC}"
 echo ""
 
