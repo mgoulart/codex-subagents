@@ -33,6 +33,7 @@ check_dependency() {
 
 echo -e "${YELLOW}[1/6] Checking dependencies...${NC}"
 check_dependency "python3"
+check_dependency "uv"
 check_dependency "uvx"
 check_dependency "codex"
 echo ""
@@ -53,7 +54,7 @@ if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
                 echo -e "   ${GREEN}brew install python3${NC}"
                 echo ""
                 ;;
-            uvx)
+            uv|uvx)
                 echo -e "${YELLOW}📦 uv (Python package manager)${NC}"
                 echo -e "   Will auto-install uv"
                 echo ""
@@ -222,8 +223,22 @@ echo ""
 # NOTE: Claude Code reads MCP config from ~/.claude.json via 'claude mcp add',
 # NOT from ~/.claude/mcp_settings.json. Using the CLI ensures correct registration.
 echo -e "${YELLOW}[4/6] Configuring MCP server...${NC}"
-UVX_PATH="$(which uvx 2>/dev/null || echo "$HOME/.local/bin/uvx")"
-claude mcp add --scope user codex-subagent --transport stdio -- "$UVX_PATH" codex-as-mcp@latest
+# Register the PATCHED server shipped in this repo, not upstream codex-as-mcp.
+# This previously pointed at `uvx codex-as-mcp@latest`, which meant none of the
+# fixes in codex-as-mcp-patched/ were ever active: agents ran without the
+# sandbox bypass and with no way to set reasoning effort, silently inheriting
+# the Codex CLI default. The symlink above puts this repo at a stable path, so
+# SCRIPT_DIR is safe to bake into the registration.
+UV_PATH="$(which uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
+PATCHED_SERVER="$SCRIPT_DIR/codex-as-mcp-patched/server.py"
+if [ ! -f "$PATCHED_SERVER" ]; then
+    echo -e "${RED}✗ Patched server not found at $PATCHED_SERVER${NC}"
+    exit 1
+fi
+# Re-running the installer must not fail on an existing registration.
+claude mcp remove --scope user codex-subagent >/dev/null 2>&1 || true
+claude mcp add --scope user codex-subagent --transport stdio -- \
+    "$UV_PATH" run --quiet --with "mcp<2" python "$PATCHED_SERVER"
 echo -e "${GREEN}✓ MCP server configured${NC}"
 echo ""
 
@@ -260,6 +275,15 @@ else
     exit 1
 fi
 
+# Registered is not the same as registered to the right thing -- the bug this
+# replaced was a working registration that pointed at the wrong server.
+if claude mcp list | grep -q "codex-as-mcp-patched"; then
+    echo -e "${GREEN}✓ Using the patched server${NC}"
+else
+    echo -e "${RED}✗ Registered server is not the patched one${NC}"
+    exit 1
+fi
+
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}✅ Installation complete!${NC}"
@@ -273,8 +297,8 @@ echo -e "${YELLOW}🎯 Usage:${NC}"
 echo -e "   ${GREEN}/codex-subagents${NC} <task description>"
 echo ""
 echo -e "${YELLOW}💡 Tips:${NC}"
-echo -e "   - MCP server runs automatically via uvx (Python-based)"
-echo -e "   - codex-as-mcp dependencies will be downloaded on first use"
+echo -e "   - MCP server is the patched build in codex-as-mcp-patched/, run via uv"
+echo -e "   - Python dependencies are fetched by uv on first use"
 echo -e "   - Make sure Codex CLI is logged in: ${GREEN}codex login${NC}"
 echo -e "   - Add .codex-temp/ to your project's .gitignore (plugin does this automatically)"
 echo -e "   - Restart Claude Code to load the Plugin"

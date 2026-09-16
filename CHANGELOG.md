@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `install.sh` now registers the patched server from `codex-as-mcp-patched/`
+  instead of upstream `codex-as-mcp@latest`. It had always registered upstream,
+  so on a fresh install *none* of this repo's patches were active — no sandbox
+  bypass, no per-agent model or effort — while the install reported success.
+  The verification step now also asserts which server got registered, since the
+  old failure mode was a perfectly valid registration pointing at the wrong
+  thing. Re-running the installer is idempotent.
 - Subagents no longer run at the Codex CLI default reasoning effort. `codex
   exec` does not read `model_reasoning_effort` from `~/.codex/config.toml` —
   only `codex-tui` does — so agents reasoned at `low` even with
