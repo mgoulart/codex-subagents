@@ -29,6 +29,10 @@ Patches applied vs original CoderMageFox version:
      and a short label extracted from the prompt, plus elapsed time.
   7. Async launch + polling — spawn_agents_async returns immediately, caller
      polls with check_agents_status to get live progress from log files.
+  8. Per-agent reasoning effort — `codex exec` does not inherit
+     model_reasoning_effort from ~/.codex/config.toml (only codex-tui does), so
+     agents silently ran at the CLI default no matter what that file said. An
+     optional `effort` passes `-c model_reasoning_effort=<value>`.
 """
 
 import asyncio
@@ -119,11 +123,35 @@ def _resolve_codex_executable() -> str:
     return codex
 
 
+# `codex exec` does NOT inherit `model_reasoning_effort` from ~/.codex/config.toml the way
+# `codex-tui` does -- it runs at the CLI default (low) unless told otherwise. That is invisible
+# from the caller's side, so every subagent silently reasoned at low effort no matter what the
+# config file said. `-c key=value` is the documented override and is what this threads through.
+VALID_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+
+
+def _effort_override(effort: str) -> list[str]:
+    """Config override args for a reasoning effort, or [] when unset.
+
+    Raises:
+        ValueError: If the effort is not one Codex accepts.
+    """
+    if not effort or not isinstance(effort, str) or not effort.strip():
+        return []
+    normalized = effort.strip().lower()
+    if normalized not in VALID_EFFORTS:
+        raise ValueError(
+            f"invalid effort {effort!r}; expected one of {', '.join(VALID_EFFORTS)}"
+        )
+    return ["-c", f"model_reasoning_effort={normalized}"]
+
+
 @mcp.tool()
 async def spawn_agent(
     ctx: Context,
     prompt: str,
     model: str = "",
+    effort: str = "",
     log_file: str = "",
     agent_label: str = "",
 ) -> str:
@@ -136,6 +164,10 @@ async def spawn_agent(
         prompt: All instructions/context the agent needs for the task.
         model: Optional model override (e.g. "o3", "gpt-4o"). Uses the Codex
                CLI default model from ~/.codex/config.toml when not specified.
+        effort: Optional reasoning effort -- one of minimal, low, medium, high,
+                xhigh. `codex exec` does not read model_reasoning_effort from
+                ~/.codex/config.toml, so without this every agent runs at the
+                CLI default (low) regardless of what that file says.
         log_file: Optional path to stream stdout/stderr to in real-time.
                   Enables `tail -f <log_file>` for live visibility.
         agent_label: Optional short label for progress messages (auto-extracted
@@ -177,6 +209,10 @@ async def spawn_agent(
         ]
         if model and isinstance(model, str) and model.strip():
             cmd += ["--model", model.strip()]
+        try:
+            cmd += _effort_override(effort)
+        except ValueError as e:
+            return f"Error: {e}"
         cmd.append(prompt)
 
         # Prepare log file handle if requested
@@ -320,10 +356,13 @@ async def spawn_agents_parallel(
 
     Args:
         agents: List of agent specs, each with a 'prompt' entry and optional
-                'label' for identification.
+                'label' for identification, 'model' and 'effort'. Set 'effort'
+                (minimal/low/medium/high/xhigh) per agent -- `codex exec`
+                otherwise runs at the CLI default regardless of
+                ~/.codex/config.toml.
                 Example: [
                     {"prompt": "Create math.md", "label": "math"},
-                    {"prompt": "Create story.md", "label": "story"}
+                    {"prompt": "Audit the parser", "label": "audit", "effort": "high"}
                 ]
         log_dir: Optional directory for agent log files. Defaults to
                  ``.codex-temp/<timestamp>/`` in the working directory.
@@ -375,6 +414,7 @@ async def spawn_agents_parallel(
 
             prompt = spec.get("prompt", "")
             model = spec.get("model", "")
+            effort = spec.get("effort", "")
             label = spec.get("label", "") or _extract_label(prompt)
 
             # Create per-agent log file
@@ -393,7 +433,7 @@ async def spawn_agents_parallel(
             agent_start = time.monotonic()
 
             output = await spawn_agent(
-                ctx, prompt, model, log_file=log_file, agent_label=label
+                ctx, prompt, model, effort=effort, log_file=log_file, agent_label=label
             )
 
             duration = _format_elapsed(time.monotonic() - agent_start)
@@ -485,7 +525,8 @@ async def spawn_agents_async(
     Each agent streams output to a log file for real-time visibility.
 
     Args:
-        agents: List of agent specs, each with a 'prompt' and optional 'label'.
+        agents: List of agent specs, each with a 'prompt' and optional 'label',
+                'model' and 'effort' (minimal/low/medium/high/xhigh).
         log_dir: Optional directory for log files. Defaults to
                  ``.codex-temp/<timestamp>/``.
 
@@ -512,6 +553,7 @@ async def spawn_agents_async(
             "log_file": log_file,
             "prompt": spec.get("prompt", ""),
             "model": spec.get("model", ""),
+            "effort": spec.get("effort", ""),
         })
 
     manifest_path = resolved_log_dir / "manifest.txt"
@@ -544,11 +586,12 @@ async def spawn_agents_async(
         log_file = meta["log_file"]
         prompt = meta["prompt"]
         model = meta["model"]
+        effort = meta.get("effort", "")
         agent_start = time.monotonic()
 
         try:
             output = await spawn_agent(
-                ctx, prompt, model, log_file=log_file, agent_label=label
+                ctx, prompt, model, effort=effort, log_file=log_file, agent_label=label
             )
             duration = _format_elapsed(time.monotonic() - agent_start)
 

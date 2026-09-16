@@ -6,3 +6,7 @@ node_modules/
 
 # Codex subagent temporary files and logs
 .codex-temp/
+
+# Python bytecode
+__pycache__/
+*.pyc

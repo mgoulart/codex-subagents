@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-agent `effort` on `spawn_agent`, `spawn_agents_parallel` and
+  `spawn_agents_async` — one of `minimal`, `low`, `medium`, `high`, `xhigh`,
+  passed to Codex as `-c model_reasoning_effort=<value>`. Invalid values are
+  rejected with the list of accepted ones rather than silently ignored.
+
+### Fixed
+
+- Subagents no longer run at the Codex CLI default reasoning effort. `codex
+  exec` does not read `model_reasoning_effort` from `~/.codex/config.toml` —
+  only `codex-tui` does — so agents reasoned at `low` even with
+  `model_reasoning_effort = "high"` configured, with nothing surfacing that to
+  the caller. Confirmed against proxy request logs before and after.
+
 ## [3.0.0] - 2026-04-09 (mgoulart fork)
 
 ### Fixed

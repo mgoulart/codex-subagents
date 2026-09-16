@@ -43,24 +43,34 @@ The orchestrator analyzes your task, splits it into independent units (max 3 age
 /codex-subagents agent 1 uses o3 for the DB schema, agent 2 uses gpt-4o for the API
 ```
 
-## Per-Agent Model Selection
+## Per-Agent Model and Reasoning Effort
 
-Each agent can use a different model by adding a `"model"` key to its spec:
+Each agent can use a different model and reasoning effort by adding `"model"` and
+`"effort"` keys to its spec:
 
 ```javascript
 mcp__codex-subagent__spawn_agents_parallel({
   agents: [
     { prompt: "Write the database schema", model: "o3" },
-    { prompt: "Write the API layer",       model: "gpt-4o" },
-    { prompt: "Write the UI components" }, // uses ~/.codex/config.toml default
+    { prompt: "Audit the parser for bugs",  effort: "high" },
+    { prompt: "Write the UI components" }, // model from ~/.codex/config.toml
   ]
 })
 ```
 
+`effort` is one of `minimal`, `low`, `medium`, `high`, `xhigh`. An unrecognised
+value is rejected with the list of accepted ones rather than silently ignored.
+
+**Set it explicitly if you care about it.** `codex exec` — which is what this
+plugin shells out to — does *not* read `model_reasoning_effort` from
+`~/.codex/config.toml`; only the interactive `codex-tui` does. So agents run at
+the CLI default no matter what that file says, and nothing surfaces that to the
+caller. `model` is not affected: it has always been read from the config file.
+
 To change the default model for all agents:
 ```bash
 # Edit ~/.codex/config.toml
-model = "o3"
+model = "o3"   # applies to agents; model_reasoning_effort does not
 ```
 
 ## Logs
@@ -93,6 +103,8 @@ Agent activity is logged to `.codex-temp/[timestamp]/` in your project. Add it t
 - No prompt quoting — correct `create_subprocess_exec` arg passing
 - `os.path.realpath` — macOS `/tmp` symlink compatibility
 - Per-agent `model` support — passes `--model` to `codex exec`
+- Per-agent `effort` support — passes `-c model_reasoning_effort=<value>`, which
+  `codex exec` does not otherwise pick up from `~/.codex/config.toml`
 
 ## Bugs Fixed from Original
 
