@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only `codex-tui` does — so agents reasoned at `low` even with
   `model_reasoning_effort = "high"` configured, with nothing surfacing that to
   the caller. Confirmed against proxy request logs before and after.
+- A Codex output line over 64 KiB no longer hangs the call. The stream reader
+  used `readline()`, which raises past asyncio's 64 KiB line limit; with the
+  reader dead nothing drained the pipe, Codex blocked writing to it and never
+  exited, and the call surfaced only when the process was killed ("Separator is
+  not found, and chunk exceed the limit"). Output is now read in fixed-size
+  chunks.
+- Backup for a Codex process that finishes its task but does not exit: the
+  wait loop finds the run's session log (`$CODEX_HOME/sessions/**/rollout-*.jsonl`,
+  matched by working directory, start time and prompt), and once it records
+  `task_complete` and the process is still alive 30s later, returns its
+  `last_agent_message` (marked as recovered) and kills Codex's process group,
+  which now includes the MCP servers it started.
 
 ## [3.0.0] - 2026-04-09 (mgoulart fork)
 

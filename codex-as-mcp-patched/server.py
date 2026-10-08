@@ -36,10 +36,12 @@ Patches applied vs original CoderMageFox version:
 """
 
 import asyncio
+import codecs
 import json
 import os
 import re
 import shutil
+import signal
 import tempfile
 import time
 from datetime import datetime
@@ -146,6 +148,71 @@ def _effort_override(effort: str) -> list[str]:
     return ["-c", f"model_reasoning_effort={normalized}"]
 
 
+# Seconds a process may outlive the task_complete in its session log before
+# the watchdog takes the answer from the log and kills it.
+STUCK_GRACE_SECONDS = 30.0
+
+
+def _find_session_log(started_at: float, cwd: str, prompt: str) -> Path | None:
+    """The Codex session log (rollout-*.jsonl) of the run started at started_at
+    in cwd with this prompt, or None while it has not appeared."""
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    needle = prompt.strip()[:200]
+    candidates = []
+    for path in (home / "sessions").glob("*/*/*/rollout-*.jsonl"):
+        try:
+            if path.stat().st_mtime >= started_at - 5:
+                candidates.append(path)
+        except OSError:
+            continue
+    for path in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                meta = json.loads(fh.readline())
+                if meta.get("payload", {}).get("cwd") != cwd:
+                    continue
+                # The prompt is the first user message after the injected context.
+                for _, line in zip(range(40), fh):
+                    payload = json.loads(line).get("payload", {})
+                    if payload.get("type") == "message" and payload.get("role") == "user":
+                        text = "".join(c.get("text", "") for c in payload.get("content", []))
+                        if text.strip().startswith(needle):
+                            return path
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _session_final_answer(path: Path) -> str | None:
+    """last_agent_message of the session's task_complete, once it has one."""
+    answer = None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"task_complete"' not in line:
+                    continue
+                payload = json.loads(line).get("payload", {})
+                if payload.get("type") == "task_complete":
+                    answer = payload.get("last_agent_message") or ""
+    except (OSError, ValueError):
+        return None
+    return answer
+
+
+async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Stop Codex and everything it started (its MCP servers keep pipes open)."""
+    for sig, wait in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 5.0)):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=wait)
+            return
+        except asyncio.TimeoutError:
+            continue
+
+
 @mcp.tool()
 async def spawn_agent(
     ctx: Context,
@@ -245,6 +312,8 @@ async def spawn_agent(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=_build_child_env(),
+                # Own process group, so a stuck run can be killed with its MCP children.
+                start_new_session=True,
             )
         except Exception as e:
             if log_fh:
@@ -261,17 +330,26 @@ async def spawn_agent(
             chunks: list[bytes],
             prefix: str,
         ) -> None:
-            """Read stream line-by-line, appending to chunks and writing to log."""
+            """Drain the stream into chunks and the log.
+
+            Reads fixed-size chunks: readline() raises on a line over 64 KiB, and a
+            dead reader lets the pipe fill until Codex blocks writing to it.
+            """
             if not stream:
                 return
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            at_line_start = True
             while True:
-                line = await stream.readline()
-                if not line:
+                data = await stream.read(65536)
+                if not data:
                     break
-                chunks.append(line)
+                chunks.append(data)
                 if log_fh:
-                    decoded = line.decode(errors="replace")
-                    log_fh.write(f"{prefix}{decoded}")
+                    parts = []
+                    for part in decoder.decode(data).splitlines(keepends=True):
+                        parts.append((prefix if at_line_start else "") + part)
+                        at_line_start = part.endswith("\n")
+                    log_fh.write("".join(parts))
                     log_fh.flush()
 
         stdout_reader = asyncio.create_task(
@@ -281,13 +359,34 @@ async def spawn_agent(
             _stream_reader(proc.stderr, stderr_chunks, "[stderr] ")
         )
 
-        # Send periodic heartbeats with elapsed time while process runs
+        # Send periodic heartbeats with elapsed time while process runs. Backup:
+        # if the session log shows the task complete but the process lingers,
+        # take the answer from the log and stop the process.
         last_ping = time.monotonic()
+        wall_start = time.time()
+        session_log: Path | None = None
+        completed_at: float | None = None
+        log_answer: str | None = None
         while True:
             try:
                 returncode = await asyncio.wait_for(proc.wait(), timeout=5.0)
                 break
             except asyncio.TimeoutError:
+                if session_log is None:
+                    session_log = _find_session_log(wall_start, work_directory, prompt)
+                elif completed_at is None:
+                    log_answer = _session_final_answer(session_log)
+                    if log_answer is not None:
+                        completed_at = time.monotonic()
+                elif time.monotonic() - completed_at >= STUCK_GRACE_SECONDS:
+                    if log_fh:
+                        log_fh.write(
+                            f"\n!!! Task complete in {session_log} but Codex did not exit "
+                            f"within {STUCK_GRACE_SECONDS:.0f}s; answer taken from the log.\n"
+                        )
+                    await _kill_process_group(proc)
+                    returncode = 0
+                    break
                 now = time.monotonic()
                 elapsed = _format_elapsed(now - start_time)
                 if now - last_ping >= 5.0:
@@ -299,9 +398,12 @@ async def spawn_agent(
                     except Exception:
                         pass
 
-        # Wait for stream readers to finish
-        await stdout_reader
-        await stderr_reader
+        # Wait for stream readers to finish; a grandchild may still hold a pipe.
+        for reader in (stdout_reader, stderr_reader):
+            try:
+                await asyncio.wait_for(reader, timeout=10.0)
+            except (asyncio.TimeoutError, Exception):
+                reader.cancel()
 
         elapsed = _format_elapsed(time.monotonic() - start_time)
 
@@ -309,6 +411,8 @@ async def spawn_agent(
         stderr = b"".join(stderr_chunks).decode(errors="replace")
 
         output = output_path.read_text(encoding="utf-8").strip()
+        if not output and log_answer:
+            output = f"{log_answer.strip()}\n\n(Recovered from the session log {session_log}: Codex finished but did not exit.)"
 
         # Write completion to log
         if log_fh:
